@@ -11,7 +11,7 @@ cols = ["srcip", "sport", "dstip", "dsport", "proto", "state", "dur", "sbytes", 
 df = pd.read_csv(path + data_src, names = cols)
 
 # Select number of samples to produce
-n_samples = 3000
+n_samples = 10000
 random_seed = 42
 
 # Sample and drop a certain subset of the data
@@ -34,6 +34,9 @@ df_trunc["is_ftp_login"].fillna(0, inplace= True)
 df_trunc["attack_cat"].fillna("None", inplace= True)
 
 print("Handled NaN values")
+
+# The ct_ftp_cmd column has strings instead of 0 for some reason. Handle that separately
+df_trunc.loc[df_trunc["ct_ftp_cmd"] == " ", "ct_ftp_cmd"] = 0
 
 # We do not use the labels given by ports, only IP
 df_trunc.drop(labels = ["sport", "dsport"], axis =1, inplace= True)
@@ -81,6 +84,7 @@ df_cat = df_data[cat_cols]
 df_cat = pd.get_dummies(df_cat)
 
 df_data = pd.concat([df_num, df_cat], axis= 1)
+
 
 # Save results
 
