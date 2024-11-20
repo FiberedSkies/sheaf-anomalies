@@ -16,7 +16,8 @@ random_seed = 42
 
 # Sample and drop a certain subset of the data
 
-df_trunc = df.sample(n_samples, random_state= random_seed).reset_index()
+df_trunc = df.sample(n_samples, random_state= random_seed)
+df_trunc.reset_index(inplace= True, drop = True)
 
 # First handle NaN Values
 
@@ -27,6 +28,10 @@ print(f"NaN Values in the Sampled Dataset: \n {df_trunc.isna().sum()}")
 # As such, it is reasonable to fill these with 0 values
 df_trunc["ct_flw_http_mthd"].fillna(0, inplace= True)
 df_trunc["is_ftp_login"].fillna(0, inplace= True)
+
+# Fill attack type with "None" if no attack
+
+df_trunc["attack_cat"].fillna("None", inplace= True)
 
 print("Handled NaN values")
 
@@ -39,12 +44,49 @@ edge_labels = df_trunc["srcip"] + "-to-" + df_trunc["dstip"]
 
 df_trunc["Edge"] = edge_labels
 
-neighbors = []
-for i in range(len(df_trunc)):
-    sample_src = df_trunc["srcip"][i]
+# Sort data entries by edge label
 
-    neighbors.append(df_trunc[df_trunc["srcip"] == sample_src]["Edge"].nunique())
+df_trunc.sort_values('Edge', inplace= True)
+df_trunc.reset_index(inplace= True, drop = True)
+
+# Split into data, label and categories
+
+graph_labels = ["Edge", "srcip", "dstip"]
+
+timestamp_labels = ["Stime", "Ltime"]
+
+category_label = ["attack_cat"]
+
+target_label = ["Label"]
 
 
-print(pd.Series(neighbors).mean())
-print(df_trunc["srcip"].nunique())
+# Create new dataframes for each type of information
+df_data = df_trunc.drop(category_label + graph_labels + target_label + timestamp_labels, axis=1)
+
+df_graph = df_trunc[graph_labels]
+
+df_category = df_trunc[category_label]
+
+df_label = df_trunc[target_label]
+
+df_times = df_trunc[timestamp_labels]
+
+# Encode categorical data
+cat_cols = ["proto", "state", "service"]
+
+
+df_num = df_data.drop(labels = cat_cols, axis = 1)
+df_cat = df_data[cat_cols]
+
+df_cat = pd.get_dummies(df_cat)
+
+df_data = pd.concat([df_num, df_cat], axis= 1)
+
+# Save results
+
+df_data.to_csv(path + "dataset.csv")
+df_graph.to_csv(path + "graph.csv")
+df_category.to_csv(path + "attack.csv")
+df_label.to_csv(path + "label.csv")
+df_times.to_csv(path + "timestamps.csv")
+
