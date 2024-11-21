@@ -11,7 +11,7 @@ cols = ["srcip", "sport", "dstip", "dsport", "proto", "state", "dur", "sbytes", 
 df = pd.read_csv(path + data_src, names = cols)
 
 # Select number of samples to produce
-n_samples = 10000
+n_samples = 3000
 random_seed = 42
 
 # Sample and drop a certain subset of the data
