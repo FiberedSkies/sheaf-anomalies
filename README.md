@@ -1,1 +1,5 @@
 # sheaf-anomalies
+
+Test repo for a sheaf cohomology-based network anomaly detection algorithm. The detection algorithm learns a sheaf structure using a meta-learning approach, aiming to find a cohomology that captures typical benign behaviors on each connection in the network. Anomalies are found as significant deviations from this cohomology as mneasured by the coboundary. Testing is being done on both the UNSW-NB15 and CSE CIC-IDS2018 data sets. UNSW-NB15 is guaranteed to be suboptimal as all the attacks are concentrated to one pair of subnets, all in one direction no less, so minimally rich topology to work with. CSE CIC-IDS2018 is better for this.
+
+Overall, this is a very uninformed implementation. Potentially improvements can be made in incorporating prior knowledge about particular connections that can help narrow down the detection space (i.e. enforcing records use specific protocols, packet sizes, or potential timestamps).

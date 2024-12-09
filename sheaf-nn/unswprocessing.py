@@ -1,9 +1,6 @@
-from collections import Counter, defaultdict
-from glob import glob
-from pathlib import Path
+from collections import defaultdict
 import random
 import pandas as pd
-import networkx as nx
 from sklearn.calibration import LabelEncoder
 from sklearn.discriminant_analysis import StandardScaler
 import warnings
@@ -123,6 +120,7 @@ def convert_to_float(value):
             return float(value)
     except ValueError:
         return None
+    
     
 def record_count(set):
     count = 0
@@ -328,10 +326,3 @@ def process(anomalyrate: list[float], extra_samples=20000, split=0.15):
     print(f"[*] Preparing test sets for anomaly rates {anomalyrate[0]*100}%, {anomalyrate[1]*100}%, and {anomalyrate[2]*100}%")
     tests = test_set(train, target_normal, full_df, split, anomalyrate)
     return train, tests
-
-anoms = [0.05, 0.1, 0.2]
-train, tests = process(anoms)
-
-print(f"Training set size {record_count(train)}")
-for ar in anoms:
-    print(f"[+] For anomaly rate {ar*100}%, test set size {record_count(tests[ar])}")
