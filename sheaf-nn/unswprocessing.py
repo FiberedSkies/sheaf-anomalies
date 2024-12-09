@@ -5,6 +5,8 @@ import pandas as pd
 from sklearn.calibration import LabelEncoder
 from sklearn.discriminant_analysis import StandardScaler
 import warnings
+
+from sklearn.preprocessing import MinMaxScaler
 warnings.simplefilter(action='ignore', category=FutureWarning)
 warnings.simplefilter(action='ignore', category=DeprecationWarning)
 warnings.filterwarnings('ignore', category=pd.errors.DtypeWarning)
@@ -120,7 +122,7 @@ def convert_to_float(value):
         else:
             return float(value)
     except ValueError:
-        return None
+        return float(8888)
     
     
 def record_count(set):
@@ -171,13 +173,19 @@ def load_and_filter_data(min_records=1000):
     # full_df[sfeat] = full_df[sfeat].apply(convert_to_float)
     # full_df[dfeat] = full_df[dfeat].apply(convert_to_float)
 
-    src = StandardScaler()
-    dst = StandardScaler()
-    e = StandardScaler()
+    src = MinMaxScaler((-100,100))
+    dst = MinMaxScaler((-100,100))
+    e = MinMaxScaler((-100,100))
+    
+    #src = StandardScaler()
+    #dst = StandardScaler()
+    #e = StandardScaler()
 
     full_df[sfeat] = src.fit_transform(full_df[sfeat])
     full_df[dfeat] = dst.fit_transform(full_df[dfeat])
     full_df[efeat] = e.fit_transform(full_df[efeat])
+    del full_df["ct_flw_http_mthd"]
+    del full_df["is_ftp_login"]
 
     target_subnet = "175.45.176 to 149.171.126"
     target_normal = full_df[

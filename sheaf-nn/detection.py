@@ -3,6 +3,7 @@ import unswprocessing as unsw
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torch.nn.functional as F
 import numpy as np
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -12,44 +13,55 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 torch.backends.cudnn.benchmark = True
 
 class RestrictionMap(nn.Module):
-    def __init__(self, source_dim, dest_dim, edge_dim, hidden_dim=32):
+    def __init__(self, source_dim, dest_dim, edge_dim, hidden_dim=64):
         super().__init__()
+        # Add dropout and proper initialization
         self.source_mlp = nn.Sequential(
             nn.Linear(source_dim, hidden_dim),
-            nn.BatchNorm1d(hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
-            nn.BatchNorm1d(hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, edge_dim)
         )
         
         self.dest_mlp = nn.Sequential(
             nn.Linear(dest_dim, hidden_dim),
-            nn.BatchNorm1d(hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
-            nn.BatchNorm1d(hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, edge_dim)
         )
+        self._init_weights()
         self.to(device)
 
+    def _init_weights(self):
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.xavier_normal_(module.weight)
+                if module.bias is not None:
+                    nn.init.constant_(module.bias, 0)
+
     def forward(self, source_feat, dest_feat):
+        if torch.isnan(source_feat).any() or torch.isnan(dest_feat).any():
+            raise ValueError("Input features contain NaN values")
+            
+        if len(source_feat.shape) == 1:
+            source_feat = source_feat.unsqueeze(0)
+        if len(dest_feat.shape) == 1:
+            dest_feat = dest_feat.unsqueeze(0)
+            
         source_feat = source_feat.to(device)
         dest_feat = dest_feat.to(device)
 
-        print("Source feat stats:", 
-          "min:", torch.min(source_feat).item(),
-          "max:", torch.max(source_feat).item(),
-          "mean:", torch.mean(source_feat).item())
+        with torch.cuda.amp.autocast(enabled=True):
+            source_restriction = self.source_mlp(source_feat)
+            dest_restriction = self.dest_mlp(dest_feat)
 
-        source_restriction = self.source_mlp(source_feat)
-        print("Source restriction stats:", 
-            "min:", torch.min(source_restriction).item(),
-            "max:", torch.max(source_restriction).item(),
-            "mean:", torch.mean(source_restriction).item())
-        dest_restriction = self.dest_mlp(dest_feat)
+        if torch.isnan(source_restriction).any() or torch.isnan(dest_restriction).any():
+            print("Warning: NaN values detected in restrictions")
+            source_restriction = torch.nan_to_num(source_restriction, 0.0)
+            dest_restriction = torch.nan_to_num(dest_restriction, 0.0)
+
         return source_restriction, dest_restriction
     
 class MetaLearner:
@@ -70,8 +82,13 @@ class MetaLearner:
         self.eoptim = {}
 
     def coboundary_loss(self, srcrest, destrest, evec):
+        srcrest = srcrest.to(device)
+        destrest = destrest.to(device)
+        evec = evec.to(device)
+        
         combined = srcrest + destrest - 2 * evec
         norm = torch.norm(combined, p=2)
+
         return norm
     
     def metalearn(self, epochs=100, batch=32, msplit=0.25):
@@ -192,12 +209,12 @@ class MetaLearner:
         return terminal_losses
 
 class Detector(MetaLearner):
-    def __init__(self, train, tests, alpha=0.01, beta=0.005, gamma=0.001):
+    def __init__(self, train, tests, alpha=0.005, beta=0.001, gamma=0.0002):
         super().__init__(train, alpha, beta, gamma)
         self.thresholds = {}
         self.tests = tests
 
-    def train(self, epochs=100, batch=32, msplit=0.25, epsilon=0.1):
+    def train(self, epochs=150, batch=32, msplit=0.3, epsilon=0.1):
         self.metalearn(epochs, batch, msplit)
         self.initedges()
         thresholds = self.finetune(epochs, batch)
