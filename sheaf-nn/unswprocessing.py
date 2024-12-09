@@ -173,9 +173,9 @@ def load_and_filter_data(min_records=1000):
     # full_df[sfeat] = full_df[sfeat].apply(convert_to_float)
     # full_df[dfeat] = full_df[dfeat].apply(convert_to_float)
 
-    src = MinMaxScaler((-100,100))
-    dst = MinMaxScaler((-100,100))
-    e = MinMaxScaler((-100,100))
+    src = MinMaxScaler((-1,1))
+    dst = MinMaxScaler((-1,1))
+    e = MinMaxScaler((-1,1))
     
     #src = StandardScaler()
     #dst = StandardScaler()
@@ -327,7 +327,7 @@ def test_set(train: dict[dict[float]], target_normal: pd.DataFrame, full_df: pd.
         tests[ar] = ar_dict
     return tests
 
-def process(anomalyrate: list[float], extra_samples=20000, split=0.15):
+def process(anomalyrate: list[float], extra_samples=1000, split=0.15):
     print("[*] Loading and filtering data...")
     full_df, target_normal = load_and_filter_data()
     print("[*] Preparing training dataset...")

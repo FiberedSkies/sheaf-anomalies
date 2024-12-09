@@ -13,7 +13,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 torch.backends.cudnn.benchmark = True
 
 class RestrictionMap(nn.Module):
-    def __init__(self, source_dim, dest_dim, edge_dim, hidden_dim=64):
+    def __init__(self, source_dim, dest_dim, edge_dim, hidden_dim=24):
         super().__init__()
         # Add dropout and proper initialization
         self.source_mlp = nn.Sequential(
@@ -209,12 +209,12 @@ class MetaLearner:
         return terminal_losses
 
 class Detector(MetaLearner):
-    def __init__(self, train, tests, alpha=0.005, beta=0.001, gamma=0.0002):
+    def __init__(self, train, tests, alpha=0.0005, beta=0.0002, gamma=0.00015):
         super().__init__(train, alpha, beta, gamma)
         self.thresholds = {}
         self.tests = tests
 
-    def train(self, epochs=150, batch=32, msplit=0.3, epsilon=0.1):
+    def train(self, epochs=200, batch=16, msplit=0.2, epsilon=0.05):
         self.metalearn(epochs, batch, msplit)
         self.initedges()
         thresholds = self.finetune(epochs, batch)
@@ -237,13 +237,14 @@ class Detector(MetaLearner):
                 sfeat = torch.tensor(features["sfeat"]).to(device)
                 dfeat = torch.tensor(features["dfeat"]).to(device)
                 efeat = torch.tensor(features["efeat"]).to(device)
-
+                predictions = []
                 self.emaps[edge].eval()
                 with torch.no_grad():
-                    srcrest, destrest = self.emaps[edge](sfeat, dfeat)
-                    losses = self.coboundary_loss(srcrest, destrest, efeat)
+                    for i in range(len(sfeat)):
+                        srcrest, destrest = self.emaps[edge](sfeat[i], dfeat[i])
+                        loss = self.coboundary_loss(srcrest, destrest, efeat[i])
+                        predictions.append(1 if loss > self.thresholds[edge] else 0)
 
-                    predictions = [1 if loss > self.thresholds[edge] else 0 for loss in losses]
                     for i, (pred, tlabel, attack) in enumerate(zip(predictions, features['label'], features['attack'])):
                         edge_results['predictions'].append(pred)
 
