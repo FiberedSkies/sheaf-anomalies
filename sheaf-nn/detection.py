@@ -6,27 +6,32 @@ import torch.optim as optim
 import numpy as np
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
+warnings.simplefilter(action='ignore', category=UserWarning)
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 torch.backends.cudnn.benchmark = True
 
 class RestrictionMap(nn.Module):
-    def __init__(self, source_dim, dest_dim, edge_dim, hidden_dim=24):
+    def __init__(self, source_dim, dest_dim, edge_dim, hidden_dim=32):
         super().__init__()
         self.source_mlp = nn.Sequential(
             nn.Linear(source_dim, hidden_dim),
+            nn.BatchNorm1d(hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
+            nn.BatchNorm1d(hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, 14)
+            nn.Linear(hidden_dim, edge_dim)
         )
         
         self.dest_mlp = nn.Sequential(
             nn.Linear(dest_dim, hidden_dim),
+            nn.BatchNorm1d(hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
+            nn.BatchNorm1d(hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, 14)
+            nn.Linear(hidden_dim, edge_dim)
         )
         self.to(device)
 
@@ -34,7 +39,16 @@ class RestrictionMap(nn.Module):
         source_feat = source_feat.to(device)
         dest_feat = dest_feat.to(device)
 
+        print("Source feat stats:", 
+          "min:", torch.min(source_feat).item(),
+          "max:", torch.max(source_feat).item(),
+          "mean:", torch.mean(source_feat).item())
+
         source_restriction = self.source_mlp(source_feat)
+        print("Source restriction stats:", 
+            "min:", torch.min(source_restriction).item(),
+            "max:", torch.max(source_restriction).item(),
+            "mean:", torch.mean(source_restriction).item())
         dest_restriction = self.dest_mlp(dest_feat)
         return source_restriction, dest_restriction
     
@@ -50,15 +64,18 @@ class MetaLearner:
             dest_dim=len(unsw.dfeat),
             edge_dim=len(unsw.efeat)
         )
-        self.optim = optim.Adam(self.metamap.parameters(), lr=self.beta)
+        self.optim = optim.Adam(self.metamap.parameters(), lr=self.mr2)
 
         self.emaps = {}
         self.eoptim = {}
 
     def coboundary_loss(self, srcrest, destrest, evec):
-        return torch.norm(srcrest + destrest - 2 * evec, p=2)
+        combined = srcrest + destrest - 2 * evec
+        norm = torch.norm(combined, p=2)
+        return norm
     
     def metalearn(self, epochs=100, batch=32, msplit=0.25):
+        print("[*] Starting metalearning phase...")
         metalearn = {}
         for edge, features in self.trainingset.items():
 
@@ -78,7 +95,7 @@ class MetaLearner:
             for edge, features in metalearn.items():
                 orig_params = {name: param.clone() for name, param in self.metamap.named_parameters()}
                 edge_loss = 0
-                idcs = list(len(features["sfeat"]))
+                idcs = list(range(len(features["sfeat"])))
                 random.shuffle(idcs)
 
                 for batchidx in range(0, len(features["sfeat"]), batch):
@@ -93,6 +110,7 @@ class MetaLearner:
                     srcrest, destrest = self.metamap(batchsfeat, batchdfeat)
                     loss = self.coboundary_loss(srcrest, destrest, batchefeat)
                     loss.backward()
+                    torch.nn.utils.clip_grad_norm_(self.metamap.parameters(), max_norm=1.0)
 
                     with torch.no_grad():
                         for name, param in self.metamap.named_parameters():
@@ -116,6 +134,7 @@ class MetaLearner:
         self.metamap.eval()
 
     def initedges(self):
+        print("[*] Initialize restriction maps over connections...")
         for edge, features in self.trainingset.items():
             self.emaps[edge] = RestrictionMap(
                 source_dim=len(unsw.sfeat),
@@ -130,6 +149,7 @@ class MetaLearner:
             self.eoptim[edge] = optim.Adam(self.emaps[edge].parameters(), lr=self.ftr)
     
     def finetune(self, epochs=100, batch=32):
+        print("[*] Starting connection finetuning...")
         terminal_losses = {}
         for edge, emap in self.emaps.items():
             emap.train()
@@ -168,7 +188,7 @@ class MetaLearner:
             
             terminal_losses[edge] = final_epoch_loss
             emap.eval()
-        
+        print("[+] Training complete!")
         return terminal_losses
 
 class Detector(MetaLearner):
@@ -185,6 +205,7 @@ class Detector(MetaLearner):
             self.thresholds[edge] = th + epsilon
     
     def detect(self):
+        print("[*] Starting detection validation...")
         ar_results = {}
         ar_metrics = {}
         for ar, testset in self.tests.items():
@@ -199,9 +220,6 @@ class Detector(MetaLearner):
                 sfeat = torch.tensor(features["sfeat"]).to(device)
                 dfeat = torch.tensor(features["dfeat"]).to(device)
                 efeat = torch.tensor(features["efeat"]).to(device)
-
-                labels = torch.tensor(features["label"]).to(device)
-                attack = torch.tensor(features["attack"]).to(device)
 
                 self.emaps[edge].eval()
                 with torch.no_grad():
@@ -285,3 +303,15 @@ class Detector(MetaLearner):
                 for attack_type, count in sorted_attacks:
                     percentage = (count / total_detected) * 100
                     print(f"{attack_type}: {count} ({percentage:.1f}%)")
+
+anoms = [0.05, 0.1, 0.2]
+train, tests = unsw.process(anoms)
+
+print(f"Training set size {unsw.record_count(train)}")
+for ar in anoms:
+    print(f"[+] For anomaly rate {ar*100}%, test set size {unsw.record_count(tests[ar])}")
+
+detect = Detector(train, tests)
+detect.train()
+results, metrics = detect.detect()
+detect.analyze_metrics(results, metrics)

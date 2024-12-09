@@ -1,5 +1,6 @@
 from collections import defaultdict
 import random
+import numpy as np
 import pandas as pd
 from sklearn.calibration import LabelEncoder
 from sklearn.discriminant_analysis import StandardScaler
@@ -231,9 +232,9 @@ def training_set(target_normal: pd.DataFrame, full_df: pd.DataFrame, samples=200
         if edge not in train:
             train[edge] = {"sfeat": [], "dfeat": [], "efeat": []}
 
-        sfeats = row[sfeat].values
-        dfeats = row[dfeat].values
-        efeats = row[efeat].values
+        sfeats = row[sfeat].values.astype(np.float32)
+        dfeats = row[dfeat].values.astype(np.float32)
+        efeats = row[efeat].values.astype(np.float32)
 
         train[edge]["sfeat"].append(sfeats)
         train[edge]["efeat"].append(efeats)
@@ -265,9 +266,9 @@ def training_set(target_normal: pd.DataFrame, full_df: pd.DataFrame, samples=200
             if edge not in train:
                 train[edge] = {"sfeat": [], "dfeat": [], "efeat": []}
 
-            sfeats = row[sfeat].values
-            dfeats = row[dfeat].values
-            efeats = row[efeat].values
+            sfeats = row[sfeat].values.astype(np.float32)
+            dfeats = row[dfeat].values.astype(np.float32)
+            efeats = row[efeat].values.astype(np.float32)
 
             train[edge]["sfeat"].append(sfeats)
             train[edge]["efeat"].append(efeats)
@@ -303,9 +304,9 @@ def test_set(train: dict[dict[float]], target_normal: pd.DataFrame, full_df: pd.
             if edge not in ar_dict:
                 ar_dict[edge] = {"sfeat": [], "dfeat": [], "efeat": [], "label": [], "attack": []}
             
-            sfeats = row[sfeat].values
-            dfeats = row[dfeat].values
-            efeats = row[efeat].values
+            sfeats = row[sfeat].values.astype(np.float32)
+            dfeats = row[dfeat].values.astype(np.float32)
+            efeats = row[efeat].values.astype(np.float32)
             labels = row["Label"]
             attacks = row["attack_cat"]
 
