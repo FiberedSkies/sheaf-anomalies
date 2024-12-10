@@ -13,13 +13,14 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 torch.backends.cudnn.benchmark = True
 
 class RestrictionMap(nn.Module):
-    def __init__(self, source_dim, dest_dim, edge_dim, hidden_dim=24):
+    def __init__(self, source_dim, dest_dim, edge_dim, hidden_dim=32):
         super().__init__()
         # Add dropout and proper initialization
         self.source_mlp = nn.Sequential(
             nn.Linear(source_dim, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
+            # nn.Dropout(0.1),
             nn.ReLU(),
             nn.Linear(hidden_dim, edge_dim)
         )
@@ -28,6 +29,7 @@ class RestrictionMap(nn.Module):
             nn.Linear(dest_dim, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
+            # nn.Dropout(0.1),
             nn.ReLU(),
             nn.Linear(hidden_dim, edge_dim)
         )
@@ -86,8 +88,8 @@ class MetaLearner:
         destrest = destrest.to(device)
         evec = evec.to(device)
         
-        combined = srcrest + destrest - 2 * evec
-        norm = torch.norm(combined, p=2)
+        combined = 2 * evec - srcrest - destrest
+        norm = torch.norm(combined, p=2) #/ combined.numel()
 
         return norm
     
@@ -107,11 +109,15 @@ class MetaLearner:
                 self.trainingset[edge][sections] = [features[sections][i] for i in range(len(features[sections])) if i not in idx]
         
         self.metamap.train()
+        total_losses = []
         for epoch in range(epochs):
+            epoch_loss = 0
             meta_grads = {name: torch.zeros_like(param) for name, param in self.metamap.named_parameters()}
+            n_edges = len(metalearn)
             for edge, features in metalearn.items():
                 orig_params = {name: param.clone() for name, param in self.metamap.named_parameters()}
                 edge_loss = 0
+                n_batches = 0
                 idcs = list(range(len(features["sfeat"])))
                 random.shuffle(idcs)
 
@@ -134,8 +140,11 @@ class MetaLearner:
                             param.data = param.data - self.mr1 * param.grad.data
                     
                     edge_loss += loss.item()
+                    n_batches += 1
+                
+                epoch_loss += edge_loss / n_batches
                 for name, param in self.metamap.named_parameters():
-                    meta_grads[name] += (param.data - orig_params[name]) / self.mr1
+                    meta_grads[name] += param.grad.data / n_edges
             
                 with torch.no_grad():
                     for name, param in self.metamap.named_parameters():
@@ -144,9 +153,11 @@ class MetaLearner:
             with torch.no_grad():
                 for name, param in self.metamap.named_parameters():
                     param.data -= self.mr2 * meta_grads[name] / len(metalearn)
-
+            
+            avg_epoch_loss = epoch_loss / n_edges
+            total_losses.append(avg_epoch_loss)
             if epoch % 10 == 0:
-                print(f"Epoch {epoch}, Average Loss: {edge_loss/len(metalearn):.4f}")
+                print(f"Epoch {epoch}, Average Loss: {avg_epoch_loss:.4f}")
 
         self.metamap.eval()
 
@@ -209,17 +220,23 @@ class MetaLearner:
         return terminal_losses
 
 class Detector(MetaLearner):
-    def __init__(self, train, tests, alpha=0.0005, beta=0.0002, gamma=0.00015):
+    def __init__(self, train, tests, alpha=0.15, beta=0.1, gamma=0.01):
         super().__init__(train, alpha, beta, gamma)
         self.thresholds = {}
         self.tests = tests
+    
+    def counts(self):
+        counts = {}
+        for ar in self.tests:
+            counts[ar] = ar['label'].count(1)
+        return counts
 
-    def train(self, epochs=200, batch=16, msplit=0.2, epsilon=0.05):
+    def train(self, epochs=250, batch=8, msplit=0.3, epsilon=0.1):
         self.metalearn(epochs, batch, msplit)
         self.initedges()
         thresholds = self.finetune(epochs, batch)
         for edge, th in thresholds.items():
-            self.thresholds[edge] = th + epsilon
+            self.thresholds[edge] = th*(1 + epsilon)
     
     def detect(self):
         print("[*] Starting detection validation...")
@@ -286,6 +303,10 @@ class Detector(MetaLearner):
             print(f"Recall: {recall:.4f}")
             print(f"F1 Score: {f1:.4f}")
             print(f"Accuracy: {accuracy:.4f}")
+            print(f"true anomalies: {metrics['tp']}")
+            print(f"false anomalies: {metrics['fp']}")
+            print(f"true benign: {metrics['tn']}")
+            print(f"false benign: {metrics['fn']}")
             
             edge_metrics = []
             for edge, results in ar_results[ar].items():
@@ -318,9 +339,12 @@ class Detector(MetaLearner):
             total_detected = sum(metrics['attack_types'].values())
             if total_detected > 0:
                 sorted_attacks = sorted(metrics['attack_types'].items(), key=lambda x: x[1], reverse=True)
+                total = 0
                 for attack_type, count in sorted_attacks:
+                    total += count
                     percentage = (count / total_detected) * 100
-                    print(f"{attack_type}: {count} ({percentage:.1f}%)")
+                    print(f"{attack_type}: {count} {self.counts()[ar]:.1f}")
+                print(f"found {total} / {self.counts()[ar]:.1f} anomalies")
 
 anoms = [0.05, 0.1, 0.2]
 train, tests = unsw.process(anoms)

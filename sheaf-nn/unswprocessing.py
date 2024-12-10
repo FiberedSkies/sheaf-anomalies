@@ -6,7 +6,7 @@ from sklearn.calibration import LabelEncoder
 from sklearn.discriminant_analysis import StandardScaler
 import warnings
 
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import MinMaxScaler, OneHotEncoder, RobustScaler
 warnings.simplefilter(action='ignore', category=FutureWarning)
 warnings.simplefilter(action='ignore', category=DeprecationWarning)
 warnings.filterwarnings('ignore', category=pd.errors.DtypeWarning)
@@ -173,13 +173,17 @@ def load_and_filter_data(min_records=1000):
     # full_df[sfeat] = full_df[sfeat].apply(convert_to_float)
     # full_df[dfeat] = full_df[dfeat].apply(convert_to_float)
 
-    src = MinMaxScaler((-1,1))
-    dst = MinMaxScaler((-1,1))
-    e = MinMaxScaler((-1,1))
+    src = RobustScaler()
+    dst = RobustScaler()
+    e = RobustScaler()
     
-    #src = StandardScaler()
-    #dst = StandardScaler()
-    #e = StandardScaler()
+    full_df[sfeat] = src.fit_transform(full_df[sfeat])
+    full_df[dfeat] = dst.fit_transform(full_df[dfeat])
+    full_df[efeat] = e.fit_transform(full_df[efeat])
+
+    src = MinMaxScaler((-1, 1))
+    dst = MinMaxScaler((-1, 1))
+    e = MinMaxScaler((-1, 1))
 
     full_df[sfeat] = src.fit_transform(full_df[sfeat])
     full_df[dfeat] = dst.fit_transform(full_df[dfeat])
