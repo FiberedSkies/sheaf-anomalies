@@ -169,10 +169,6 @@ def load_and_filter_data(min_records=1000):
     full_df["service"] = service.fit_transform(full_df["service"])
     full_df[efeat] = full_df[efeat].astype(float)
 
-    # full_df[efeat] = full_df[efeat].apply(convert_to_float)
-    # full_df[sfeat] = full_df[sfeat].apply(convert_to_float)
-    # full_df[dfeat] = full_df[dfeat].apply(convert_to_float)
-
     src = RobustScaler()
     dst = RobustScaler()
     e = RobustScaler()

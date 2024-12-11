@@ -15,7 +15,6 @@ torch.backends.cudnn.benchmark = True
 class RestrictionMap(nn.Module):
     def __init__(self, source_dim, dest_dim, edge_dim, hidden_dim=40):
         super().__init__()
-        # Add dropout and proper initialization
         self.source_mlp = nn.Sequential(
             nn.Linear(source_dim, hidden_dim),
             nn.ReLU(),
@@ -89,7 +88,7 @@ class MetaLearner:
         evec = evec.to(device)
         
         combined = 2 * evec - srcrest - destrest
-        norm = torch.norm(combined, p=2) #/ combined.numel()
+        norm = torch.norm(combined, p=2)
 
         return norm
     
@@ -294,15 +293,13 @@ class Detector(MetaLearner):
     def analyze_metrics(self, ar_results, ar_metrics):
         for ar, metrics in ar_metrics.items():
             print(f"\nResults for {ar*100}% anomaly rate:")
-            
-            # Overall metrics same as before
+
             total_pred = metrics['tp'] + metrics['fp'] + metrics['tn'] + metrics['fn']
             precision = metrics['tp'] / (metrics['tp'] + metrics['fp']) if (metrics['tp'] + metrics['fp']) > 0 else 0
             recall = metrics['tp'] / (metrics['tp'] + metrics['fn']) if (metrics['tp'] + metrics['fn']) > 0 else 0
             f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
             accuracy = (metrics['tp'] + metrics['tn']) / total_pred if total_pred > 0 else 0
-            
-            # Print overall metrics
+
             print(f"Overall Metrics:")
             print(f"Precision: {precision:.4f}")
             print(f"Recall: {recall:.4f}")
@@ -312,12 +309,9 @@ class Detector(MetaLearner):
             print(f"false anomalies: {metrics['fp']}")
             print(f"true benign: {metrics['tn']}")
             print(f"false benign: {metrics['fn']}")
-            
-            # Edge metrics same as before...
-            
-            # New attack type analysis
+
             print("\nAttack Type Analysis:")
-            # First count total instances of each attack type in test set
+
             total_attack_counts = {}
             for edge, features in self.tests[ar].items():
                 for attack in features['attack']:
@@ -325,7 +319,6 @@ class Detector(MetaLearner):
                         total_attack_counts[attack] = 0
                     total_attack_counts[attack] += 1
 
-            # Now print comparison of detected vs total
             print(f"{'Attack Type':<20} {'Total':<8} {'Detected':<10} {'Detection Rate':<15}")
             print("-" * 55)
             
