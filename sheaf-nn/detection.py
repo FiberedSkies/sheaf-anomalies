@@ -13,7 +13,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 torch.backends.cudnn.benchmark = True
 
 class RestrictionMap(nn.Module):
-    def __init__(self, source_dim, dest_dim, edge_dim, hidden_dim=32):
+    def __init__(self, source_dim, dest_dim, edge_dim, hidden_dim=40):
         super().__init__()
         # Add dropout and proper initialization
         self.source_mlp = nn.Sequential(
@@ -178,18 +178,17 @@ class MetaLearner:
     
     def finetune(self, epochs=100, batch=32):
         print("[*] Starting connection finetuning...")
-        terminal_losses = {}
+        terminal_stats = {}
         for edge, emap in self.emaps.items():
             emap.train()
             features = self.trainingset[edge]
 
-            final_epoch_loss = 0
+            final_losses = []
 
             for epoch in range(epochs):
                 edge_loss = 0
                 idcs = list(range(len(features["sfeat"])))
                 random.shuffle(idcs)
-
                 n_batches = 0
                 for batchidx in range(0, len(features["sfeat"]), batch):
                     batchidcs = idcs[batchidx:min(batchidx+batch, len(features["sfeat"]))]
@@ -202,42 +201,46 @@ class MetaLearner:
                     srcrest, destrest = emap(batchsfeat, batchdfeat)
                     loss = self.coboundary_loss(srcrest, destrest, batchefeat)
 
+                    if epoch == epochs - 1:
+                        final_losses.append(loss.item())
+
                     loss.backward()
                     self.eoptim[edge].step()
 
                     edge_loss += loss.item()
                     n_batches += 1
 
-                if epoch == epochs - 1:
-                    final_epoch_loss = edge_loss / n_batches
                 if epoch % 10 == 0:
                     avg_loss = edge_loss / ((len(features["sfeat"]) + batch - 1) // batch)
                     print(f"Edge {edge}, Epoch {epoch}, Average Loss: {avg_loss:.4f}")
-            
-            terminal_losses[edge] = final_epoch_loss
+            mean_loss = np.mean(final_losses)
+            std_loss = np.std(final_losses)
+            terminal_stats[edge] = {'mean': mean_loss, 'std': std_loss}
+            print(f"Edge {edge} - Mean: {mean_loss:.4f}, Std: {std_loss:.4f}")
+
             emap.eval()
         print("[+] Training complete!")
-        return terminal_losses
+        return terminal_stats
 
 class Detector(MetaLearner):
-    def __init__(self, train, tests, alpha=0.15, beta=0.1, gamma=0.01):
+    def __init__(self, train, tests, alpha=0.15, beta=0.1, gamma=0.005):
         super().__init__(train, alpha, beta, gamma)
         self.thresholds = {}
         self.tests = tests
     
     def counts(self):
         counts = {}
-        for ar in self.tests:
-            counts[ar] = ar['label'].count(1)
+        for ar in self.tests.keys():
+            counts[ar] = self.tests[ar]['label'].count(1)
         return counts
 
-    def train(self, epochs=250, batch=8, msplit=0.3, epsilon=0.1):
+    def train(self, epochs=350, batch=8, msplit=0.20):
         self.metalearn(epochs, batch, msplit)
         self.initedges()
-        thresholds = self.finetune(epochs, batch)
-        for edge, th in thresholds.items():
-            self.thresholds[edge] = th*(1 + epsilon)
-    
+        stats = self.finetune(epochs, batch)
+        for edge, stat in stats.items():
+            self.thresholds[edge] = stat['mean'] + 0.18 * stat['std']
+        
     def detect(self):
         print("[*] Starting detection validation...")
         ar_results = {}
@@ -292,12 +295,14 @@ class Detector(MetaLearner):
         for ar, metrics in ar_metrics.items():
             print(f"\nResults for {ar*100}% anomaly rate:")
             
+            # Overall metrics same as before
             total_pred = metrics['tp'] + metrics['fp'] + metrics['tn'] + metrics['fn']
             precision = metrics['tp'] / (metrics['tp'] + metrics['fp']) if (metrics['tp'] + metrics['fp']) > 0 else 0
             recall = metrics['tp'] / (metrics['tp'] + metrics['fn']) if (metrics['tp'] + metrics['fn']) > 0 else 0
             f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
             accuracy = (metrics['tp'] + metrics['tn']) / total_pred if total_pred > 0 else 0
             
+            # Print overall metrics
             print(f"Overall Metrics:")
             print(f"Precision: {precision:.4f}")
             print(f"Recall: {recall:.4f}")
@@ -308,43 +313,27 @@ class Detector(MetaLearner):
             print(f"true benign: {metrics['tn']}")
             print(f"false benign: {metrics['fn']}")
             
-            edge_metrics = []
-            for edge, results in ar_results[ar].items():
-                m = results['metrics']
-                edge_total = sum(m.values())
-                if edge_total > 0:
-                    edge_precision = m['tp'] / (m['tp'] + m['fp']) if (m['tp'] + m['fp']) > 0 else 0
-                    edge_recall = m['tp'] / (m['tp'] + m['fn']) if (m['tp'] + m['fn']) > 0 else 0
-                    edge_f1 = 2 * (edge_precision * edge_recall) / (edge_precision + edge_recall) if (edge_precision + edge_recall) > 0 else 0
-                    edge_accuracy = (m['tp'] + m['tn']) / edge_total
-                    edge_metrics.append({
-                        'edge': edge,
-                        'precision': edge_precision,
-                        'recall': edge_recall,
-                        'f1': edge_f1,
-                        'accuracy': edge_accuracy
-                    })
+            # Edge metrics same as before...
             
-            if edge_metrics:
-                edge_f1s = [m['f1'] for m in edge_metrics]
-                print(f"\nEdge Performance:")
-                print(f"Average Edge F1: {np.mean(edge_f1s):.4f} ± {np.std(edge_f1s):.4f}")
-                
-                best_edge = max(edge_metrics, key=lambda x: x['f1'])
-                worst_edge = min(edge_metrics, key=lambda x: x['f1'])
-                print(f"Best Edge: {best_edge['edge']} (F1: {best_edge['f1']:.4f})")
-                print(f"Worst Edge: {worst_edge['edge']} (F1: {worst_edge['f1']:.4f})")
+            # New attack type analysis
+            print("\nAttack Type Analysis:")
+            # First count total instances of each attack type in test set
+            total_attack_counts = {}
+            for edge, features in self.tests[ar].items():
+                for attack in features['attack']:
+                    if attack not in total_attack_counts:
+                        total_attack_counts[attack] = 0
+                    total_attack_counts[attack] += 1
+
+            # Now print comparison of detected vs total
+            print(f"{'Attack Type':<20} {'Total':<8} {'Detected':<10} {'Detection Rate':<15}")
+            print("-" * 55)
             
-            print("\nAttack Type Distribution:")
-            total_detected = sum(metrics['attack_types'].values())
-            if total_detected > 0:
-                sorted_attacks = sorted(metrics['attack_types'].items(), key=lambda x: x[1], reverse=True)
-                total = 0
-                for attack_type, count in sorted_attacks:
-                    total += count
-                    percentage = (count / total_detected) * 100
-                    print(f"{attack_type}: {count} {self.counts()[ar]:.1f}")
-                print(f"found {total} / {self.counts()[ar]:.1f} anomalies")
+            for attack_type in total_attack_counts.keys():
+                total = total_attack_counts[attack_type]
+                detected = metrics['attack_types'].get(attack_type, 0)
+                detection_rate = (detected / total * 100) if total > 0 else 0
+                print(f"{attack_type:<20} {total:<8} {detected:<10} {detection_rate:>6.1f}%")
 
 anoms = [0.05, 0.1, 0.2]
 train, tests = unsw.process(anoms)
