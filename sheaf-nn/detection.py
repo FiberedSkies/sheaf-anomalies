@@ -13,24 +13,24 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 torch.backends.cudnn.benchmark = True
 
 class RestrictionMap(nn.Module):
-    def __init__(self, source_dim, dest_dim, edge_dim, hidden_dim=40):
+    def __init__(self, source_dim, dest_dim, edge_dim, hidden_dim=34):
         super().__init__()
         self.source_mlp = nn.Sequential(
             nn.Linear(source_dim, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
-            # nn.Dropout(0.1),
             nn.ReLU(),
-            nn.Linear(hidden_dim, edge_dim)
+            nn.Linear(hidden_dim, edge_dim),
+            nn.Tanh()
         )
         
         self.dest_mlp = nn.Sequential(
             nn.Linear(dest_dim, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
-            # nn.Dropout(0.1),
             nn.ReLU(),
-            nn.Linear(hidden_dim, edge_dim)
+            nn.Linear(hidden_dim, edge_dim),
+            nn.Tanh()
         )
         self._init_weights()
         self.to(device)
@@ -183,12 +183,13 @@ class MetaLearner:
             features = self.trainingset[edge]
 
             final_losses = []
-
+            epoch_losses = []
             for epoch in range(epochs):
                 edge_loss = 0
                 idcs = list(range(len(features["sfeat"])))
                 random.shuffle(idcs)
                 n_batches = 0
+                
                 for batchidx in range(0, len(features["sfeat"]), batch):
                     batchidcs = idcs[batchidx:min(batchidx+batch, len(features["sfeat"]))]
 
@@ -209,11 +210,12 @@ class MetaLearner:
                     edge_loss += loss.item()
                     n_batches += 1
 
+                epoch_losses.append(edge_loss)
                 if epoch % 10 == 0:
                     avg_loss = edge_loss / ((len(features["sfeat"]) + batch - 1) // batch)
                     print(f"Edge {edge}, Epoch {epoch}, Average Loss: {avg_loss:.4f}")
             mean_loss = np.mean(final_losses)
-            std_loss = np.std(final_losses[:100])
+            std_loss = np.quantile(epoch_losses[100:], 0.95)
             terminal_stats[edge] = {'mean': mean_loss, 'std': std_loss}
             print(f"Edge {edge} - Mean: {mean_loss:.4f}, Std: {std_loss:.4f}")
 
@@ -233,12 +235,12 @@ class Detector(MetaLearner):
             counts[ar] = self.tests[ar]['label'].count(1)
         return counts
 
-    def train(self, epochs=350, batch=6, msplit=0.20):
+    def train(self, epochs=350, batch=8, msplit=0.20):
         self.metalearn(epochs, batch, msplit)
         self.initedges()
         stats = self.finetune(epochs, batch)
         for edge, stat in stats.items():
-            self.thresholds[edge] = stat['mean'] + 0.25 * stat['std']
+            self.thresholds[edge] = stat['std']
         
     def detect(self):
         print("[*] Starting detection validation...")

@@ -5,7 +5,7 @@ A script to preprocess the NB15 Dataset for SNN training
 import pandas as pd
 
 # Load Dataset for Processing
-path = "../data/"
+path = "././data/"
 data_src = "UNSW-NB15_4.csv"
 cols = [
     "srcip",
@@ -61,7 +61,7 @@ cols = [
 df = pd.read_csv(path + data_src, names=cols)
 
 # Select number of samples to produce
-n_samples = 3000
+n_samples = 36000
 random_seed = 42
 
 # Sample and drop a certain subset of the data
