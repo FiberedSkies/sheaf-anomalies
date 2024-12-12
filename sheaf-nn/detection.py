@@ -213,7 +213,7 @@ class MetaLearner:
                     avg_loss = edge_loss / ((len(features["sfeat"]) + batch - 1) // batch)
                     print(f"Edge {edge}, Epoch {epoch}, Average Loss: {avg_loss:.4f}")
             mean_loss = np.mean(final_losses)
-            std_loss = np.std(final_losses)
+            std_loss = np.std(final_losses[:100])
             terminal_stats[edge] = {'mean': mean_loss, 'std': std_loss}
             print(f"Edge {edge} - Mean: {mean_loss:.4f}, Std: {std_loss:.4f}")
 
@@ -233,12 +233,12 @@ class Detector(MetaLearner):
             counts[ar] = self.tests[ar]['label'].count(1)
         return counts
 
-    def train(self, epochs=350, batch=8, msplit=0.20):
+    def train(self, epochs=350, batch=6, msplit=0.20):
         self.metalearn(epochs, batch, msplit)
         self.initedges()
         stats = self.finetune(epochs, batch)
         for edge, stat in stats.items():
-            self.thresholds[edge] = stat['mean'] + 0.18 * stat['std']
+            self.thresholds[edge] = stat['mean'] + 0.25 * stat['std']
         
     def detect(self):
         print("[*] Starting detection validation...")
